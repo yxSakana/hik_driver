@@ -257,7 +257,6 @@ private:
     TriggerSource m_trigger_source = TriggerSource::Software; // 触发源
     void* m_handle = nullptr; // 设备句柄
     static const std::map<unsigned int, std::string> m_ErrorMess;
-    mutable std::shared_mutex m_handle_mutex;
     MV_CC_DEVICE_INFO_LIST m_devices;  // 所有设备
     bool m_opened_status = false;  // 打开状态
     bool m_initialized_frame_info = false;  // 是否已经初始化完成信息

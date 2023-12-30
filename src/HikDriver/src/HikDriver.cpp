@@ -119,10 +119,7 @@ bool HikDriver::connectDriver(const int& index, const TriggerSource& trigger) {
 
 bool HikDriver::findDriver(int mode) {
     unsigned int error_code;
-    {
-        std::shared_lock<std::shared_mutex> lk(m_handle_mutex);
-        error_code = MV_CC_EnumDevices(mode, &m_devices);
-    }
+    error_code = MV_CC_EnumDevices(mode, &m_devices);
     if (!checkErrorCode(error_code, "findDriver") || m_devices.nDeviceNum <= 0) {
         m_opened_status = m_initialized_frame_info = false;
         LOG(WARNING) << "No hik camera devices";
@@ -134,21 +131,16 @@ bool HikDriver::findDriver(int mode) {
 
 bool HikDriver::openDriver(int index) {
     unsigned int error_code;
-    {
-        std::unique_lock<std::shared_mutex> lk(m_handle_mutex);
-        error_code = MV_CC_CreateHandle(&m_handle, m_devices.pDeviceInfo[index]);
-        if (!checkErrorCode(error_code, "MV_CC_CreateHandle")) return false;
-        error_code = MV_CC_OpenDevice(m_handle);
-        if (!checkErrorCode(error_code, "MV_CC_OpenDevice")) return false;
-        error_code = MV_CC_SetEnumValue(m_handle, "TriggerMode", static_cast<unsigned int>(m_is_trigger));
-        if (!checkErrorCode(error_code, "MV_CC_EnumValue => TriggerMode")) return false;
-        lk.unlock();
-        if (m_is_trigger) setTriggerSource(m_trigger_source);
-        lk.lock();
-        error_code = MV_CC_StartGrabbing(m_handle);
-        if (!checkErrorCode(error_code, "openDriver Failed!"))
-            return false;
-    }
+    error_code = MV_CC_CreateHandle(&m_handle, m_devices.pDeviceInfo[index]);
+    if (!checkErrorCode(error_code, "MV_CC_CreateHandle")) return false;
+    error_code = MV_CC_OpenDevice(m_handle);
+    if (!checkErrorCode(error_code, "MV_CC_OpenDevice")) return false;
+    error_code = MV_CC_SetEnumValue(m_handle, "TriggerMode", static_cast<unsigned int>(m_is_trigger));
+    if (!checkErrorCode(error_code, "MV_CC_EnumValue => TriggerMode")) return false;
+    if (m_is_trigger) setTriggerSource(m_trigger_source);
+    error_code = MV_CC_StartGrabbing(m_handle);
+    if (!checkErrorCode(error_code, "openDriver Failed!"))
+        return false;
     m_opened_status = true;
     return true;
 }
@@ -160,10 +152,7 @@ bool HikDriver::initFrameInfo() {
     }
 
     unsigned int error_code;
-    {
-        std::lock_guard<std::shared_mutex> lk(m_handle_mutex);
-        error_code = MV_CC_GetIntValue(m_handle, "PayloadSize", &m_frame_size_info);
-    }
+    error_code = MV_CC_GetIntValue(m_handle, "PayloadSize", &m_frame_size_info);
     checkErrorCode(error_code, "GetIntValue => PayloadSize");
     m_data_size = m_frame_size_info.nCurValue;
     m_initialized_frame_info = true;
@@ -247,10 +236,7 @@ bool HikDriver::readImageData(unsigned char* data_buffer,
         return false;
     }
     unsigned int status;
-    {
-        std::lock_guard<std::shared_mutex> lk(m_handle_mutex);
-        status = MV_CC_GetOneFrameTimeout(m_handle, data_buffer, m_data_size, &frame_info, timeout_ms);
-    }
+    status = MV_CC_GetOneFrameTimeout(m_handle, data_buffer, m_data_size, &frame_info, timeout_ms);
     checkErrorCode(status, "readImageData()");
     return status == MV_OK;
 }
@@ -261,10 +247,7 @@ bool HikDriver::readImageData(MV_FRAME_OUT& frame, const unsigned int& timeout_m
         return false;
     }
     unsigned int status;
-    {
-        std::lock_guard<std::shared_mutex> lk(m_handle_mutex);
-        status = MV_CC_GetImageBuffer(m_handle, &frame, timeout_ms);
-    }
+    status = MV_CC_GetImageBuffer(m_handle, &frame, timeout_ms);
     return checkErrorCode(status, "readImageData()");
 }
 
@@ -279,39 +262,29 @@ void HikDriver::triggerImageData(HikFrame& frame) {
     }
 
     unsigned int error_code;
-    {
-        std::lock_guard<std::shared_mutex> lk(m_handle_mutex);
-        error_code = MV_CC_SetCommandValue(m_handle, "TriggerSoftware");
-    }
+    error_code = MV_CC_SetCommandValue(m_handle, "TriggerSoftware");
     checkErrorCode(error_code, "triggerImageData()");
     getFrame(frame, 0);
 }
 
 void HikDriver::setTriggerMode(bool mode) {
     unsigned int error_code;
-    {
-        std::lock_guard<std::shared_mutex> lk(m_handle_mutex);
-        error_code = MV_CC_SetEnumValue(m_handle, "TriggerMode", static_cast<unsigned int>(mode));
-    }
-    checkErrorCode(error_code, "MV_CC_EnumValue => TriggerMode");
+    error_code = MV_CC_SetEnumValue(m_handle, "TriggerMode", static_cast<unsigned int>(mode));
+    if (checkErrorCode(error_code, "MV_CC_EnumValue => TriggerMode")) {
+        m_is_trigger = mode;
+    };
 }
 
 std::string HikDriver::getTriggerMode() const {
     MVCC_ENUMVALUE r;
-    {
-        std::lock_guard<std::shared_mutex> lk(m_handle_mutex);
-        MV_CC_GetEnumValue(m_handle, "TriggerMode", &r);
-    }
+    MV_CC_GetEnumValue(m_handle, "TriggerMode", &r);
     std::string res = r.nCurValue? "ON": "OFF";
     return res;
 }
 
 std::string HikDriver::getTriggerSources() const {
     MVCC_ENUMVALUE r;
-    {
-        std::lock_guard<std::shared_mutex> lk(m_handle_mutex);
-        MV_CC_GetEnumValue(m_handle, "TriggerSource", &r);
-    }
+    MV_CC_GetEnumValue(m_handle, "TriggerSource", &r);
     switch (r.nCurValue) {
         case 0: return "Line0";
         case 1: return "Line1";
@@ -328,100 +301,67 @@ void HikDriver::setTriggerSource(const TriggerSource& trigger) {
     if (!m_is_trigger) return;
 
     unsigned int error_code;
-    {
-        std::lock_guard<std::shared_mutex> lk(m_handle_mutex);
-        error_code = MV_CC_SetEnumValue(m_handle, "TriggerSource", static_cast<unsigned int>(trigger));
-    }
-    checkErrorCode(error_code, "setTriggerSource");
+    error_code = MV_CC_SetEnumValue(m_handle, "TriggerSource", static_cast<unsigned int>(trigger));
+    if (checkErrorCode(error_code, "setTriggerSource")) m_trigger_source = trigger;
 }
 
 float HikDriver::getTriggerDelay() const {
     MVCC_FLOATVALUE val;
     unsigned int error_code;
-    {
-        std::shared_lock<std::shared_mutex> lk(m_handle_mutex);
-        error_code = MV_CC_GetFloatValue(m_handle, "TriggerDelay", &val);
-    }
+    error_code = MV_CC_GetFloatValue(m_handle, "TriggerDelay", &val);
     float res = checkErrorCode(error_code, "getExposureTime()")? val.fCurValue: 0.f;
     return res;
 }
 
 void HikDriver::setTriggerDelay(const float& delay_us) {
     unsigned int error_code;
-    {
-        std::lock_guard<std::shared_mutex> lk(m_handle_mutex);
-        error_code = MV_CC_SetFloatValue(m_handle, "TriggerDelay", delay_us);;
-    }
+    error_code = MV_CC_SetFloatValue(m_handle, "TriggerDelay", delay_us);;
     checkErrorCode(error_code, "setTriggerDelay");
 }
 
 void HikDriver::setExposureTimeRange(int lower, int upper) {
     unsigned int error_code;
-    {
-        std::lock_guard<std::shared_mutex> lk(m_handle_mutex);
-        error_code = MV_CC_SetIntValue(m_handle, "AutoExposureTimeLowerLimit", lower);
-    }
+    error_code = MV_CC_SetIntValue(m_handle, "AutoExposureTimeLowerLimit", lower);
     checkErrorCode(error_code, "setExposureTimeRange() - lower");
-    {
-        std::lock_guard<std::shared_mutex> lk(m_handle_mutex);
-        error_code = MV_CC_SetIntValue(m_handle, "AutoExposureTimeUpperLimit", upper);
-    }
+    error_code = MV_CC_SetIntValue(m_handle, "AutoExposureTimeUpperLimit", upper);
     checkErrorCode(error_code, "setExposureTimeRange() - upper");
 }
 
 void HikDriver::setGainRange(int lower, int upper) {
     unsigned int error_code;
-    {
-        std::lock_guard<std::shared_mutex> lk(m_handle_mutex);
-        error_code = MV_CC_SetIntValue(m_handle, "AutoGainLowerLimit", lower);
-    }
+    error_code = MV_CC_SetIntValue(m_handle, "AutoGainLowerLimit", lower);
     checkErrorCode(error_code, "setGainRange() - lower");
-    {
-        std::lock_guard<std::shared_mutex> lk(m_handle_mutex);
-        error_code =  MV_CC_SetIntValue(m_handle, "AutoGainUpperLimit", upper);
-    }
+    error_code =  MV_CC_SetIntValue(m_handle, "AutoGainUpperLimit", upper);
     checkErrorCode(error_code, "setGainRange() - upper");
 }
 
 void HikDriver::setAuto(int brightness) {
     /* 自动曝光、自动增益、亮度255 */
-    unsigned int error_code, error_code1, error_code2;
-    {
-        std::lock_guard<std::shared_mutex> lk(m_handle_mutex);
-        error_code = MV_CC_SetEnumValue(m_handle, "ExposureAuto", 2);
-        error_code1 = MV_CC_SetEnumValue(m_handle, "GainAuto", 2);
-        error_code2 = MV_CC_SetIntValue(m_handle, "Brightness", brightness);
-    }
+    unsigned int error_code;
+    error_code = MV_CC_SetEnumValue(m_handle, "ExposureAuto", 2);
     checkErrorCode(error_code, "setAuto() => ExposureAuto");
-    checkErrorCode(error_code1, "setAuto() => GainAuto");
-    checkErrorCode(error_code2, "setAuto() => Brightness");
+    error_code = MV_CC_SetEnumValue(m_handle, "GainAuto", 2);
+    checkErrorCode(error_code, "setAuto() => GainAuto");
+    error_code = MV_CC_SetIntValue(m_handle, "Brightness", brightness);
+    checkErrorCode(error_code, "setAuto() => Brightness");
 }
 
 void HikDriver::setAutoExposureTime(int mode) {
     unsigned int error_code;
-    {
-        std::lock_guard<std::shared_mutex> lk(m_handle_mutex);
-        error_code = MV_CC_SetEnumValue(m_handle, "ExposureAuto", mode);
-    }
+    error_code = MV_CC_SetEnumValue(m_handle, "ExposureAuto", mode);
     checkErrorCode(error_code, "setAutoExposureTime()");
 }
 
 void HikDriver::setAutoGain(int mode) {
     unsigned int error_code;
-    {
-        std::lock_guard<std::shared_mutex> lk(m_handle_mutex);
-        error_code = MV_CC_SetEnumValue(m_handle, "GainAuto", mode);
-    }
+    error_code = MV_CC_SetEnumValue(m_handle, "GainAuto", mode);
     checkErrorCode(error_code, "setAutoGain()");
 }
 
 std::string HikDriver::getAutoExposureTime() const {
     MVCC_ENUMVALUE r;
     unsigned int error_code;
-    {
-        std::shared_lock<std::shared_mutex> lk(m_handle_mutex);
-        error_code = MV_CC_GetEnumValue(m_handle, "ExposureAuto", &r);
-    }
+    error_code = MV_CC_GetEnumValue(m_handle, "ExposureAuto", &r);
     if (checkErrorCode(error_code, "getAutoExposureTime()")) {
         switch (r.nCurValue) {
             case 0:
@@ -441,10 +381,7 @@ std::string HikDriver::getAutoExposureTime() const {
 std::string HikDriver::getAutoGain() const {
     MVCC_ENUMVALUE r;
     unsigned int error_code;
-    {
-        std::shared_lock<std::shared_mutex> lk(m_handle_mutex);
-        error_code =  MV_CC_GetEnumValue(m_handle, "GainAuto", &r);
-    }
+    error_code =  MV_CC_GetEnumValue(m_handle, "GainAuto", &r);
     if (checkErrorCode(error_code, "getAutoGain()")) {
         switch (r.nCurValue) {
             case 0:
@@ -462,45 +399,32 @@ std::string HikDriver::getAutoGain() const {
 }
 
 void HikDriver::setExposureTime(float timems) {
-    unsigned int error_code, error_code1;
-    {
-        std::lock_guard<std::shared_mutex> lk(m_handle_mutex);
-        error_code1 = MV_CC_SetEnumValue(m_handle, "ExposureAuto", 0);
-        error_code =  MV_CC_SetFloatValue(m_handle, "ExposureTime", timems);
-    }
+    unsigned int error_code;
+    error_code = MV_CC_SetEnumValue(m_handle, "ExposureAuto", 0);
+    checkErrorCode(error_code, "setExposureTime() => off ExposureAuto");
+    error_code =  MV_CC_SetFloatValue(m_handle, "ExposureTime", timems);
     checkErrorCode(error_code, "setExposureTime()");
-    checkErrorCode(error_code1, "setExposureTime() => off ExposureAuto");
 }
 
 HikDriver::ParamInfo<float> HikDriver::getExposureTime() const {
     MVCC_FLOATVALUE val;
     unsigned int error_code;
-    {
-        std::shared_lock<std::shared_mutex> lk(m_handle_mutex);
-        error_code = MV_CC_GetFloatValue(m_handle, "ExposureTime", &val);
-    }
+    error_code = MV_CC_GetFloatValue(m_handle, "ExposureTime", &val);
     checkErrorCode(error_code, "getExposureTime()");
     return HikDriver::ParamInfo<float>(val);
 }
 
 void HikDriver::setGain(float val) {
-    unsigned int error_code, error_code1;
-    {
-        std::lock_guard<std::shared_mutex> lk(m_handle_mutex);
-        error_code1 = MV_CC_SetEnumValue(m_handle, "GainAuto", 0);
-        error_code = MV_CC_SetFloatValue(m_handle, "Gain", val);
-    }
+    unsigned int error_code;
+    error_code = MV_CC_SetEnumValue(m_handle, "GainAuto", 0);
+    checkErrorCode(error_code, "setGain() => off GainAuto");
+    error_code = MV_CC_SetFloatValue(m_handle, "Gain", val);
     checkErrorCode(error_code, "setGain()");
-    checkErrorCode(error_code1, "setGain() => off GainAuto");
 }
 
 HikDriver::ParamInfo<float> HikDriver::getGain() const {
     MVCC_FLOATVALUE val;
-    unsigned int error_code;
-    {
-        std::shared_lock<std::shared_mutex> lk(m_handle_mutex);
-        error_code = MV_CC_GetFloatValue(m_handle, "Gain", &val);
-    }
+    unsigned int error_code = MV_CC_GetFloatValue(m_handle, "Gain", &val);
     checkErrorCode(error_code, "getGain()");
     return HikDriver::ParamInfo<float>(val);
 }
@@ -510,11 +434,7 @@ void HikDriver::saveAccess(const std::string& user_file, const std::string& devi
     file_access.pUserFileName = user_file.c_str();
     file_access.pDevFileName = device_file.c_str();
 
-    unsigned int error_code;
-    {
-        std::lock_guard<std::shared_mutex> lk(m_handle_mutex);
-        error_code = MV_CC_FileAccessWrite(m_handle, &file_access);
-    }
+    unsigned int error_code = MV_CC_FileAccessWrite(m_handle, &file_access);
     checkErrorCode(error_code, "saveAccess()");
 }
 
@@ -523,11 +443,7 @@ void HikDriver::loadAccess(const std::string& user_file, const std::string& devi
     file_access.pUserFileName = user_file.c_str();
     file_access.pDevFileName = device_file.c_str();
 
-    unsigned int error_code;
-    {
-        std::lock_guard<std::shared_mutex> lk(m_handle_mutex);
-        error_code = MV_CC_FileAccessRead(m_handle, &file_access);
-    }
+    unsigned int error_code = MV_CC_FileAccessRead(m_handle, &file_access);
     checkErrorCode(error_code, "loadAccess()");
 }
 
