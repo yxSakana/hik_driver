@@ -1,0 +1,8 @@
+.idea/
+.cache/
+cmake-build-*/
+build/
+log/
+video/
+docs/
+src/main.cpp
